@@ -3,25 +3,27 @@ Test the custom tensorflow utilities
 """
 import os
 from tempfile import TemporaryDirectory
+
 import numpy as np
 import pytest
 import tensorflow as tf
 
+from phygnn import TfModel
 from phygnn.layers.custom_layers import (
     ExpandDims,
     FlattenAxis,
-    GaussianNoiseAxis,
-    SkipConnection,
-    SpatioTemporalExpansion,
-    TileLayer,
     FunctionalLayer,
     GaussianAveragePooling2D,
-    SigLin,
+    GaussianNoiseAxis,
     LogTransform,
+    SigLin,
+    SkipConnection,
+    SpatioTemporalExpansion,
+    Sup3rFixer,
+    TileLayer,
     UnitConversion,
 )
 from phygnn.layers.handlers import HiddenLayers, Layers
-from phygnn import TfModel
 
 
 @pytest.mark.parametrize(
@@ -224,7 +226,7 @@ def test_temporal_depth_to_time(t_mult, s_mult, t_roll):
                                     t_roll=t_roll)
     n_filters = 2 * s_mult**2 * t_mult
     shape = (1, 4, 4, 3, n_filters)
-    n = np.product(shape)
+    n = np.prod(shape)
     x = np.arange(n).reshape(shape)
     y = layer(x)
     assert y.shape[0] == x.shape[0]
@@ -622,3 +624,22 @@ def test_unit_conversion():
         # bad number of scalar values
         layer = UnitConversion(adder=0, scalar=[100, 1, 1])
         y = layer(x)
+
+
+def test_fixer_layer():
+    """Make sure ``Sup3rFixer`` layer works properly"""
+    x = np.random.uniform(0, 1, (1, 10, 10, 4)).astype(np.float32)
+    y = np.random.uniform(0, 1, (1, 10, 10, 1)).astype(np.float32)
+    mask = np.random.choice([False, True], (1, 10, 10), p=[0.1, 0.9])
+    y[mask] = np.nan
+
+    x = tf.convert_to_tensor(x)
+    y = tf.convert_to_tensor(y)
+
+    layer = Sup3rFixer()
+    out = layer(x, y, feature_index=0).numpy()
+
+    assert tf.reduce_any(tf.math.is_nan(y))
+    assert np.allclose(out[..., 0][~mask], y[..., 0][~mask])
+    assert x.shape == out.shape
+    assert not tf.reduce_any(tf.math.is_nan(out))
